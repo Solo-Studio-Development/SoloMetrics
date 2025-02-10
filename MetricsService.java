@@ -3,6 +3,9 @@ package net.solostudio.skillgrind.utils;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.Plugin;
+import org.jetbrains.annotations.Contract;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.*;
 import java.net.URI;
@@ -19,6 +22,7 @@ import java.util.stream.Collector;
 import java.util.stream.Collectors;
 import java.util.zip.GZIPOutputStream;
 
+@SuppressWarnings("deprecation")
 public final class MetricsService {
     private static final String CONFIG_PATH = "bStats/config.yml";
     private static final String API_ENDPOINT = "https://bStats.org/api/v2/data/bukkit";
@@ -68,8 +72,8 @@ public final class MetricsService {
                     .thenAccept(this::logResponse)
                     .exceptionally(this::handleError);
 
-        } catch (Exception e) {
-            config.logger().log(Level.WARNING, "Metrics collection failed", e);
+        } catch (Exception exception) {
+            config.logger().log(Level.WARNING, "Metrics collection failed", exception);
         }
     }
 
@@ -102,12 +106,11 @@ public final class MetricsService {
         }
     }
 
-    private Void handleError(Throwable ex) {
-        config.logger().log(Level.WARNING, "Metrics submission error", ex);
+    private @Nullable Void handleError(Throwable exception) {
+        config.logger().log(Level.WARNING, "Metrics submission error", exception);
         return null;
     }
 
-    // Configuration
     private record MetricsConfig(
             boolean enabled,
             String serverUUID,
@@ -125,13 +128,13 @@ public final class MetricsService {
             );
         }
 
-        private static boolean loadBoolean(Plugin plugin, String key, boolean def) {
+        private static boolean loadBoolean(@NotNull Plugin plugin, String key, boolean def) {
             File configFile = new File(plugin.getDataFolder(), CONFIG_PATH);
             YamlConfiguration yaml = YamlConfiguration.loadConfiguration(configFile);
             return yaml.getBoolean(key, def);
         }
 
-        private static String loadServerUUID(Plugin plugin) {
+        private static String loadServerUUID(@NotNull Plugin plugin) {
             File configFile = new File(plugin.getDataFolder(), CONFIG_PATH);
             YamlConfiguration yaml = YamlConfiguration.loadConfiguration(configFile);
 
@@ -139,15 +142,14 @@ public final class MetricsService {
                 yaml.set("serverUuid", UUID.randomUUID().toString());
                 try {
                     yaml.save(configFile);
-                } catch (IOException e) {
-                    plugin.getLogger().log(Level.WARNING, "Failed to save server UUID", e);
+                } catch (IOException exception) {
+                    plugin.getLogger().log(Level.WARNING, "Failed to save server UUID", exception);
                 }
             }
             return yaml.getString("serverUuid");
         }
     }
 
-    // Scheduler
     private static class MetricsScheduler {
         private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(
                 Thread.ofVirtual().name("metrics-scheduler-", 0).factory()
@@ -175,66 +177,59 @@ public final class MetricsService {
         }
     }
 
-    // HTTP Client
-    private static class HttpClientService {
-        private static final HttpClient CLIENT = HttpClient.newHttpClient();
-        private final MetricsConfig config;
-
-        HttpClientService(MetricsConfig config) {
-            this.config = config;
-        }
+    private record HttpClientService(MetricsConfig config) {
+            private static final HttpClient CLIENT = HttpClient.newHttpClient();
 
         CompletableFuture<HttpResponse<String>> post(JsonObject payload) {
-            try {
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(API_ENDPOINT))
-                        .header("Content-Encoding", "gzip")
-                        .header("User-Agent", "MetricsService/" + METRICS_VERSION)
-                        .POST(createBody(payload))
-                        .build();
+                try {
+                    HttpRequest request = HttpRequest.newBuilder()
+                            .uri(URI.create(API_ENDPOINT))
+                            .header("Content-Encoding", "gzip")
+                            .header("User-Agent", "MetricsService/" + METRICS_VERSION)
+                            .POST(createBody(payload))
+                            .build();
 
-                return CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+                    return CLIENT.sendAsync(request, HttpResponse.BodyHandlers.ofString());
 
-            } catch (Exception e) {
-                return CompletableFuture.failedFuture(e);
+                } catch (Exception exception) {
+                    return CompletableFuture.failedFuture(exception);
+                }
+            }
+
+            private HttpRequest.@NotNull BodyPublisher createBody(JsonObject payload) throws IOException {
+                if (config.logData()) {
+                    config.logger().info(() -> "Sending metrics data:\n" + payload.toJson());
+                }
+                return HttpRequest.BodyPublishers.ofByteArray(compress(payload.toJson()));
+            }
+
+            private static byte @NotNull [] compress(@NotNull String data) throws IOException {
+                ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+                try (GZIPOutputStream gzip = new GZIPOutputStream(buffer)) {
+                    gzip.write(data.getBytes(StandardCharsets.UTF_8));
+                }
+                return buffer.toByteArray();
             }
         }
 
-        private HttpRequest.BodyPublisher createBody(JsonObject payload) throws IOException {
-            if(config.logData()) {
-                config.logger().info(() -> "Sending metrics data:\n" + payload.toJson());
-            }
-            return HttpRequest.BodyPublishers.ofByteArray(compress(payload.toJson()));
-        }
-
-        private static byte[] compress(String data) throws IOException {
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            try(GZIPOutputStream gzip = new GZIPOutputStream(buffer)) {
-                gzip.write(data.getBytes(StandardCharsets.UTF_8));
-            }
-            return buffer.toByteArray();
-        }
-    }
-
-    // JSON Model
     public sealed interface JsonValue permits JsonObject, JsonArray, JsonPrimitive {
         String toJson();
 
         static JsonValue of(Object value) {
-            if(value == null) return new JsonPrimitive(null);
-            if(value instanceof JsonValue) return (JsonValue) value;
-            if(value instanceof Map) return parseMap((Map<?, ?>) value);
-            if(value instanceof Collection) return parseCollection((Collection<?>) value);
+            if (value == null) return new JsonPrimitive(null);
+            if (value instanceof JsonValue) return (JsonValue) value;
+            if (value instanceof Map) return parseMap((Map<?, ?>) value);
+            if (value instanceof Collection) return parseCollection((Collection<?>) value);
             return new JsonPrimitive(value);
         }
 
-        private static JsonObject parseMap(Map<?, ?> map) {
+        private static @NotNull JsonObject parseMap(@NotNull Map<?, ?> map) {
             JsonObject obj = new JsonObject();
             map.forEach((k, v) -> obj.add(k.toString(), v));
             return obj;
         }
 
-        private static JsonArray parseCollection(Collection<?> col) {
+        private static @NotNull JsonArray parseCollection(@NotNull Collection<?> col) {
             JsonArray arr = new JsonArray();
             col.forEach(v -> arr.add(JsonValue.of(v)));
             return arr;
@@ -265,7 +260,7 @@ public final class MetricsService {
             return this;
         }
 
-        public static Collector<JsonValue, ?, JsonArray> collector() {
+        public static @NotNull Collector<JsonValue, ?, JsonArray> collector() {
             return Collector.of(
                     JsonArray::new,
                     JsonArray::add,
@@ -291,7 +286,6 @@ public final class MetricsService {
         }
     }
 
-    // Charts
     public sealed interface MetricsChart permits AbstractChart {
         JsonObject collect(Logger logger);
     }
@@ -327,8 +321,9 @@ public final class MetricsService {
             this.valueSupplier = valueSupplier;
         }
 
+        @Contract(" -> new")
         @Override
-        protected JsonValue collectData() {
+        protected @NotNull JsonValue collectData() {
             return new JsonPrimitive(valueSupplier.get());
         }
     }
@@ -348,7 +343,7 @@ public final class MetricsService {
                     .add("serverType", detectServerType());
         }
 
-        private String detectServerType() {
+        private @NotNull String detectServerType() {
             try {
                 Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
                 return "Folia";
@@ -366,14 +361,14 @@ public final class MetricsService {
             this.plugin = plugin;
         }
 
+        @Contract(" -> new")
         @Override
-        protected JsonValue collectData() {
+        protected @NotNull JsonValue collectData() {
             return new JsonPrimitive(plugin.getDescription().getVersion());
         }
     }
 
-    // Utility
-    private static String escape(String input) {
+    private static @NotNull String escape(@NotNull String input) {
         return input.chars()
                 .collect(StringBuilder::new, (sb, c) -> {
                     switch (c) {
