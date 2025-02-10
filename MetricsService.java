@@ -40,7 +40,7 @@ public final class MetricsService {
         this.httpClient = new HttpClientService(config);
         this.scheduler = new MetricsScheduler(config);
 
-        if(config.enabled()) {
+        if (config.enabled()) {
             scheduler.schedule(this::collectAndSend);
             registerCoreCharts(serviceId);
         }
@@ -100,7 +100,7 @@ public final class MetricsService {
     }
 
     private void logResponse(HttpResponse<String> response) {
-        if(config.logResponse()) {
+        if (config.logResponse()) {
             config.logger().info(() -> "Metrics response: %d %s".formatted(
                     response.statusCode(), response.body()));
         }
@@ -138,7 +138,7 @@ public final class MetricsService {
             File configFile = new File(plugin.getDataFolder(), CONFIG_PATH);
             YamlConfiguration yaml = YamlConfiguration.loadConfiguration(configFile);
 
-            if(!yaml.contains("serverUuid")) {
+            if (!yaml.contains("serverUuid")) {
                 yaml.set("serverUuid", UUID.randomUUID().toString());
                 try {
                     yaml.save(configFile);
@@ -279,10 +279,12 @@ public final class MetricsService {
     public record JsonPrimitive(Object value) implements JsonValue {
         @Override
         public String toJson() {
-            if(value == null) return "null";
-            if(value instanceof Boolean) return value.toString();
-            if(value instanceof Number) return value.toString();
-            return "\"%s\"".formatted(escape(value.toString()));
+            return switch (value) {
+                case null -> "null";
+                case Boolean ignored -> value.toString();
+                case Number ignored -> value.toString();
+                default -> "\"%s\"".formatted(escape(value.toString()));
+            };
         }
     }
 
@@ -304,8 +306,8 @@ public final class MetricsService {
                 return data != null ?
                         new JsonObject().add("chartId", chartId).add("data", data) :
                         null;
-            } catch (Exception e) {
-                logger.log(Level.WARNING, "Failed to collect chart: " + chartId, e);
+            } catch (Exception exception) {
+                logger.log(Level.WARNING, "Failed to collect chart: " + chartId, exception);
                 return null;
             }
         }
@@ -347,7 +349,7 @@ public final class MetricsService {
             try {
                 Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
                 return "Folia";
-            } catch (ClassNotFoundException e) {
+            } catch (ClassNotFoundException ignored) {
                 return "Bukkit";
             }
         }
